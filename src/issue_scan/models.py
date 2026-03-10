@@ -14,8 +14,6 @@ class RepoIssue:
     url: str
     latest_user_comment: str
     marker: str
-    issue_class: str
-    issue_reason: str
     local_path: str
     code_sync: str = ""
 
@@ -25,7 +23,7 @@ class RepoIssue:
 
     @property
     def summary_part(self) -> str:
-        return f"{self.repo}#{self.number}[{self.issue_class};{self.issue_reason}]"
+        return f"{self.repo}#{self.number}"
 
 
 @dataclass

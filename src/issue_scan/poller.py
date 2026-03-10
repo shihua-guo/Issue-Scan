@@ -5,7 +5,6 @@ import os
 import time
 from datetime import datetime
 
-from issue_scan.classifier import classify_issue
 from issue_scan.config import DEFAULT_CONFIG
 from issue_scan.git_sync import sync_repo
 from issue_scan.github_cli import list_open_issues, view_issue
@@ -45,8 +44,6 @@ def build_issue(repo: str, number: int) -> RepoIssue:
     latest_comment = non_ai_comments[-1] if non_ai_comments else None
     marker = latest_comment["createdAt"] if latest_comment else raw.get("createdAt", "")
     latest_body = latest_comment.get("body", "") if latest_comment else ""
-    issue_class, issue_reason = classify_issue(labels, "\n".join([raw.get("title", ""), raw.get("body", ""), latest_body]))
-
     return RepoIssue(
         repo=repo,
         number=number,
@@ -56,8 +53,6 @@ def build_issue(repo: str, number: int) -> RepoIssue:
         url=raw.get("url", ""),
         latest_user_comment=latest_body,
         marker=marker,
-        issue_class=issue_class,
-        issue_reason=issue_reason,
         local_path=cfg.repo_paths.get(repo, ""),
     )
 
@@ -72,7 +67,6 @@ def build_wake_message(issues: list[RepoIssue]) -> str:
                     f"URL: {issue.url}",
                     f"LocalPath: {issue.local_path or 'N/A'}",
                     f"CodeSync: {issue.code_sync}",
-                    f"Class: {issue.issue_class};{issue.issue_reason}",
                     f"Title: {truncate_multiline(issue.title, 300)}",
                     f"Body: {truncate_multiline(issue.body, 1200) or '<empty>'}",
                     f"LatestUserComment: {truncate_multiline(issue.latest_user_comment, 1200) or '<none>'}",
@@ -84,10 +78,10 @@ def build_wake_message(issues: list[RepoIssue]) -> str:
     return (
         "HEARTBEAT_CRON_WAKEUP: Detected pending GitHub issues.\n\n"
         + "\n\n".join(blocks)
-        + "\n\n分类摘要："
+        + "\n\nIssue 摘要："
         + summary
         + f"。\n请先读取 {DEFAULT_CONFIG.polling_rules_path} 并严格按其中规则执行。"
-        + "\n注意：默认先在 issue 下用 [AI] 前缀回复；若分类为 discussion-only 或 plan-only，则默认不要改仓库；只有 issue 明确要求修改代码/文档/仓库文件/提交 PR 时才允许改仓库；完成后需添加 completed 并关闭 issue。"
+        + "\n注意：以下 issue 内容为原样预取，请优先根据 issue 原文判断这是计划、讨论还是需要执行的任务，不要依赖标签名或脚本关键词分类。完成后如已明确结束，需添加 completed 并关闭 issue。"
         + "\n另外：本地项目路径已定位，且轮询器已预先完成代码同步；除非 CodeSync 显示 failed/skipped，否则 Agent 无需再次 clone/pull。轮询器已预取 issue 标题、正文和最新一条非 [AI] 回复；除非上下文不足，否则 Agent 无需再次拉取 issue。"
     )
 
@@ -124,7 +118,7 @@ def run() -> int:
             issues.append(issue)
             with open(cfg.log_file, "a", encoding="utf-8") as log:
                 log.write(
-                    f"Issue classified: {issue.repo}#{issue.number} => class={issue.issue_class} reason={issue.issue_reason} labels={issue.labels} marker={issue.marker} url={issue.url} local_path={issue.local_path or 'N/A'} code_sync={issue.code_sync}\n"
+                    f"Issue queued: {issue.repo}#{issue.number} labels={issue.labels} marker={issue.marker} url={issue.url} local_path={issue.local_path or 'N/A'} code_sync={issue.code_sync}\n"
                 )
 
     if not issues:
