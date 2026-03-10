@@ -44,6 +44,9 @@ src/issue_scan/
   models.py       # dataclasses
   poller.py       # polling workflow
   wake.py         # OpenClaw wake integration
+skills/
+  add-issue-scan-project/
+    SKILL.md      # reusable procedure for adding a new scanned repository
 ```
 
 ## Requirements
@@ -205,6 +208,14 @@ Confirm:
 - Issue-Scan runs every minute
 - issues are deduplicated correctly
 - wake delivery succeeds when matching issues exist
+
+## Included skill
+
+This repository now includes a reusable skill:
+
+- `skills/add-issue-scan-project/SKILL.md`
+
+Use it when a user asks to add another repository into the Issue-Scan workflow. It captures the expected edit targets, invariants, validation steps, and completion checklist so another agent can repeat the same process with lower token cost.
 
 ## Notes for future agents
 
