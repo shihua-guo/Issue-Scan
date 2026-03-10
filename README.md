@@ -1,17 +1,16 @@
 # Issue-Scan
 
-Issue-Scan is a Python-based GitHub issue polling tool designed for OpenClaw workflows.
+Issue-Scan is a Python-based GitHub issue polling tool for OpenClaw workflows.
 
-It replaces a shell-based polling script with a more maintainable and extensible Python implementation.
+It replaces the older shell-based polling script with a more maintainable and reproducible Python implementation.
 
 ## What it does
 
 - Polls multiple GitHub repositories for open issues
 - Filters issues by author
-- Ignores issues with configured labels such as `Idea`, `Plan Mode`, and `completed`
-- Distinguishes user updates from AI replies using a reply prefix like `[AI]`
+- Ignores lifecycle labels such as `completed`
+- Distinguishes user updates from AI replies using reply prefixes such as `[AI]`
 - Builds a deduplication marker from the latest non-AI comment timestamp
-- Classifies issues into lightweight categories before waking the agent
 - Resolves repository-to-local-path mappings
 - Syncs local repositories before wakeup when safe
 - Preloads minimal issue context:
@@ -19,29 +18,20 @@ It replaces a shell-based polling script with a more maintainable and extensible
   - body
   - latest non-AI comment
 - Sends a compact but context-rich wakeup message to OpenClaw
+- Passes issue content through to the agent without keyword-based semantic classification
 
-## Why Python instead of shell
+## Current behavior contract
 
-Using Python for issue polling is generally a better long-term choice than shell for this use case.
+The current deployment follows these rules:
 
-### Benefits
+- Scan only open issues authored by the configured GitHub user
+- Do **not** skip issues because they have labels like `Idea` or `Plan Mode`
+- Skip issues labeled `completed`
+- Do **not** classify issues into `plan-only`, `discussion-only`, or `implementation-request`
+- Forward the issue title/body/latest user comment as raw context
+- Let the agent decide whether the issue is a discussion, a plan, or an execution request based on the issue text itself
 
-- Easier to maintain as logic grows
-- Easier to test and refactor
-- Cleaner data structures for issue metadata and config
-- Better support for future features:
-  - YAML / JSON config
-  - per-repo rules
-  - structured logging
-  - retries / backoff
-  - notifications
-  - unit tests
-  - GitHub API integration without heavy shell parsing
-
-### Tradeoff
-
-- Slightly more setup than a single shell script
-- But much better extensibility once the polling logic becomes non-trivial
+This is intentional. The user writes the intent directly in the issue body, so the scanner should avoid brittle keyword heuristics.
 
 ## Project structure
 
@@ -50,19 +40,10 @@ src/issue_scan/
   cli.py          # entry point
   config.py       # configuration structures
   github_cli.py   # wrappers around gh commands
-  classifier.py   # issue classification rules
   git_sync.py     # safe local repository sync
   models.py       # dataclasses
   poller.py       # polling workflow
   wake.py         # OpenClaw wake integration
-```
-
-## Installation
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
 ```
 
 ## Requirements
@@ -71,6 +52,15 @@ pip install -e .
 - `gh` installed and authenticated
 - OpenClaw CLI available
 - Local repository paths available on disk
+- Access to the target OpenClaw session/channel for wake delivery
+
+## Installation
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
 ## Example usage
 
@@ -78,14 +68,154 @@ pip install -e .
 issue-scan
 ```
 
-The current implementation is designed to preserve the behavior of the existing shell workflow while making future extensions easier.
+## Reproducible deployment guide
 
-## Intended migration path
+This section is written so another agent can fully reproduce the same setup on another machine.
 
-1. Keep the shell version running as the current production path
-2. Build parity in Python
-3. Validate wakeup content and dedup behavior
-4. Replace the shell script with the Python project when stable
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/shihua-guo/Issue-Scan.git
+cd Issue-Scan
+```
+
+### 2. Create a virtual environment and install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### 3. Ensure system dependencies exist
+
+The machine must have:
+
+- `gh` installed and already authenticated
+- `git`
+- `python3`
+- `openclaw` CLI available at the configured path
+
+Recommended checks:
+
+```bash
+gh auth status
+git --version
+python3 --version
+openclaw --help
+```
+
+### 4. Configure scan targets in `src/issue_scan/config.py`
+
+The current production setup scans:
+
+- `shihua-guo/clawdbot` → `/root/clawd`
+- `shihua-guo/callchain-analysis` → `/root/clawd/tmp/callchain-analysis`
+- `shihua-guo/llm-free` → `/root/clawd/tmp/llm-free`
+- `shihua-guo/Issue-Scan` → `/root/clawd/tmp/Issue-Scan`
+
+It also uses:
+
+- `author="shihua-guo"`
+- `ignored_labels=["completed"]`
+- AI reply prefixes including `[AI]`
+- wake target `telegram:5454111304`
+- polling rules file `/root/clawd/GITHUB_ISSUE_POLLING.md`
+
+When reproducing on another machine, update the following if needed:
+
+- repo list
+- local repo paths
+- author
+- wake target / channel
+- `openclaw` binary path
+- `gh` binary path
+- polling rules file path
+
+### 5. Install the polling rules file
+
+Issue-Scan depends on a companion rules document named `GITHUB_ISSUE_POLLING.md`.
+
+Copy the repository version of that file to the OpenClaw workspace path expected by config, for example:
+
+```bash
+cp docs/GITHUB_ISSUE_POLLING.md /root/clawd/GITHUB_ISSUE_POLLING.md
+```
+
+If the target workspace differs, adjust the config accordingly.
+
+### 6. Test a manual run
+
+Before enabling cron, run:
+
+```bash
+source .venv/bin/activate
+issue-scan
+```
+
+Then inspect logs:
+
+```bash
+tail -n 100 /tmp/clawdbot_poll.log
+```
+
+Expected behavior:
+
+- no syntax/runtime errors
+- matching issues are queued
+- unchanged issue keys do not wake repeatedly
+- if there are no matching issues, the log says `No matching issues found.`
+
+### 7. Disable the old shell cron job
+
+If the older shell script is still active, disable it before enabling Issue-Scan.
+
+Example old job:
+
+```cron
+* * * * * /root/clawd/scripts/check_issues.sh
+```
+
+Do not let both run at the same time.
+
+### 8. Enable the new cron job
+
+Example production cron:
+
+```cron
+* * * * * cd /root/clawd/tmp/Issue-Scan && . /root/clawd/tmp/Issue-Scan/.venv/bin/activate && issue-scan >> /tmp/issue-scan-cron.log 2>&1
+```
+
+This keeps the runtime simple and reproducible.
+
+### 9. Validate after cron switch
+
+Check:
+
+```bash
+crontab -l
+tail -n 100 /tmp/issue-scan-cron.log
+tail -n 100 /tmp/clawdbot_poll.log
+```
+
+Confirm:
+
+- old cron is disabled
+- new cron is present
+- Issue-Scan runs every minute
+- issues are deduplicated correctly
+- wake delivery succeeds when matching issues exist
+
+## Notes for future agents
+
+If you are another agent reproducing this setup, preserve these invariants unless the user explicitly changes them:
+
+1. `completed` remains the only ignored label
+2. `Idea` / `Plan Mode` must not block scanning
+3. issue content must be forwarded raw
+4. the scanner must not hardcode semantic classification rules for “plan vs execute”
+5. the agent decides behavior from the issue text itself
+6. the old shell polling cron should stay disabled once migration is complete
 
 ## License
 
