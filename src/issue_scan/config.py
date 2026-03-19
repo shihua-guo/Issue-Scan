@@ -20,7 +20,7 @@ DEFAULT_CONFIG = AppConfig(
         "shihua-guo/Issue-Scan": "/root/clawd/tmp/Issue-Scan",
         "shihua-guo/opengauss-tool": "/root/clawd/tmp/opengauss-tool",
         "shihua-guo/browser-llm-bridge": "/root/projects/apps/browser-llm-bridge",
-        "shihua-guo/Healthy": "/root/clawd/tmp/Healthy",
+        "shihua-guo/Healthy": "/root/projects/apps/Healthy",
     },
     author="shihua-guo",
     ignored_labels=["completed"],
